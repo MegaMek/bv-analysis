@@ -1,0 +1,193 @@
+---
+title: "Analysis"
+format: html
+---
+
+```{r}
+#| label: load-libraries
+#| include: false
+library(here)
+library(tidyverse)
+library(readr)
+library(modelsummary)
+library(stringr)
+library(gt)
+```
+
+```{r}
+#| label: read-data
+#| echo: false
+units <- read_delim(here("data_raw", "Units.txt"), delim = "|") 
+units <- units |> 
+  rename(unit_name=Combined, clan=Clan, weight=Weight, 
+         date=`Intro Date`, unit_type=`Unit Type`, bv=BV,
+         tech=`Tech Rating`) |>
+  mutate(quality = str_sub(tech, 1, 1),
+         unit_type = ifelse(unit_type == "Biped Mech" | unit_type == "Quad Mech" 
+                            | unit_type == "Tripod Mech" | unit_type == "Landair Mech", "Mech", 
+                            ifelse(unit_type == "Tank" | unit_type == "Superheavy Tank", "Tank",
+                                   ifelse(unit_type == "Support Tank" | unit_type == "Large Support Tank", "Support Tank",
+                                          unit_type))),
+         unit_type = relevel(factor(unit_type), "Mech"),
+         group = case_when(
+           unit_type == "Mech" | unit_type == "ProtoMech" | 
+             unit_type == "Tank" | unit_type == "VTOL" |
+             unit_type == "Battlearmor" | unit_type == "Infantry" | 
+             unit_type == "Aerospace fighter" | 
+             unit_type == "Conventional Fighter" ~ "Combat",
+           str_detect(unit_type, "Support") | unit_type == "Small Craft" ~ "Support",
+           TRUE ~ "Large Craft")) |>
+  select(unit_name, clan, weight, date, quality, unit_type, group, bv)
+```
+
+```{r}
+units |>
+  filter(group == "Combat") |>
+  ggplot(aes(x=weight, y=bv))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="lm", se=FALSE)+
+  geom_smooth(color="red", se=FALSE)+
+  facet_wrap(~unit_type, scales = "free")+
+  theme_bw()
+```
+
+```{r}
+units |>
+  filter(group == "Combat") |>
+  ggplot(aes(x=weight, y=bv))+
+  geom_point(alpha=0.1)+
+  geom_smooth(method="lm", se=FALSE)+
+  geom_smooth(color="red", se=FALSE)+
+  scale_x_log10()+
+  scale_y_log10()+
+  facet_wrap(~unit_type, scales = "free")+
+  theme_bw()
+```
+
+```{r}
+units |>
+  filter(group == "Support") |>
+  ggplot(aes(x=weight, y=bv))+
+  geom_point(alpha=0.6)+
+  geom_smooth(method="lm", se=FALSE)+
+  geom_smooth(color="red", se=FALSE)+
+  facet_wrap(~unit_type, scales = "free")+
+  theme_bw()
+```
+
+```{r}
+units |>
+  filter(group == "Support") |>
+  ggplot(aes(x=weight, y=bv))+
+  geom_point(alpha=0.6)+
+  geom_smooth(method="lm", se=FALSE)+
+  geom_smooth(color="red", se=FALSE)+
+  scale_x_log10()+
+  scale_y_log10()+
+  facet_wrap(~unit_type, scales = "free")+
+  theme_bw()
+```
+
+```{r}
+units |>
+  filter(group == "Large Craft") |>
+  ggplot(aes(x=weight, y=bv))+
+  geom_point(alpha=0.2)+
+  geom_smooth(method="lm", se=FALSE)+
+  geom_smooth(color="red", se=FALSE)+
+  facet_wrap(~unit_type, scales = "free")+
+  theme_bw()
+```
+
+```{r}
+units |>
+  filter(group == "Large Craft") |>
+  ggplot(aes(x=weight, y=bv))+
+  geom_point(alpha=0.2)+
+  geom_smooth(method="lm", se=FALSE)+
+  geom_smooth(color="red", se=FALSE)+
+  scale_x_log10()+
+  scale_y_log10()+
+  facet_wrap(~unit_type, scales = "free")+
+  theme_bw()
+```
+
+```{r}
+models <- units |>
+  filter(group == "Combat") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(bv~weight, data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Combat",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
+             statistic = NULL)
+```
+
+```{r}
+models <- units |>
+  filter(group == "Combat") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(log(bv)~log(weight), data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Combat",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
+             statistic = NULL)
+```
+
+
+```{r}
+models <- units |>
+  filter(group == "Support") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(bv~weight, data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Support",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
+             statistic = NULL)
+```
+
+```{r}
+models <- units |>
+  filter(group == "Support") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(log(bv)~log(weight), data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Support",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
+             statistic = NULL)
+```
+
+```{r}
+models <- units |>
+  filter(group == "Large Craft") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(bv~weight, data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Large Craft",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
+             statistic = NULL)
+```
+
+```{r}
+models <- units |>
+  filter(group == "Large Craft") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(log(bv)~log(weight), data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Large Craft",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
+             statistic = NULL)
+```
+
