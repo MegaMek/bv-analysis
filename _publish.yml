@@ -1,0 +1,4 @@
+- source: analysis.qmd
+  netlify:
+    - id: 261303a5-c90c-4c3c-b1ae-340c8be296e5
+      url: 'https://gleeful-croquembouche-32c070.netlify.app'
