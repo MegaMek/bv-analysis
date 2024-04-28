@@ -1,6 +1,14 @@
 ---
-title: "Analysis"
-format: html
+title: "BV to Weight Analysis"
+format:
+  pdf: default
+  html:
+    embed-resources: true
+    toc: true
+execute: 
+  echo: false
+  warning: false
+  message: false
 ---
 
 ```{r}
@@ -24,9 +32,12 @@ units <- units |>
          tech=`Tech Rating`) |>
   mutate(quality = str_sub(tech, 1, 1),
          unit_type = ifelse(unit_type == "Biped Mech" | unit_type == "Quad Mech" 
-                            | unit_type == "Tripod Mech" | unit_type == "Landair Mech", "Mech", 
-                            ifelse(unit_type == "Tank" | unit_type == "Superheavy Tank", "Tank",
-                                   ifelse(unit_type == "Support Tank" | unit_type == "Large Support Tank", "Support Tank",
+                            | unit_type == "Tripod Mech" | 
+                              unit_type == "Landair Mech", "Mech", 
+                            ifelse(unit_type == "Tank" | 
+                                     unit_type == "Superheavy Tank", "Tank",
+                                   ifelse(unit_type == "Support Tank" | 
+                                            unit_type == "Large Support Tank", "Support Tank",
                                           unit_type))),
          unit_type = relevel(factor(unit_type), "Mech"),
          group = case_when(
@@ -40,18 +51,53 @@ units <- units |>
   select(unit_name, clan, weight, date, quality, unit_type, group, bv)
 ```
 
+## Introduction
+
+The goal of this analysis is to find a relatively simple equation to describe the predicted BV of a unit by its weight (i.e. tonnage) and unit type. This will allow us to create a "generic" BV for each entity based on a simple equation. This generic BV can be used for balancing forces when you don't want features of unit or pilot quality to determine that balance. 
+
+For the analysis, we downloaded information on all units from the current MegaMek database using existing Java features. we combined some unit types together for ease of analysis:
+
+* All mech types were combined togethe, including lams and tripod mechs into a single Mech category. 
+* Superheavy Tanks were combined with Tanks.
+* Large Support Tanks were combined with Support Tanks.
+
+For the actual analysis, we split unit types into grouops of Combat, Support, and Large Craft for ease of analysis.
+
+We considered two basic models for predicting BV. First we considered a linear model:
+
+$$\hat{bv}_i = \beta_0+\beta_1(weight_i)$$
+
+This model predicts BV as a linear function of weight for all units of the same type. The slope ($\beta_1$) tells us the expected increase in BV for a one ton increase in weight. The intercept ($\beta_0$) is the predicted BV when weight is zero - its not a meaningful value in this case, but gives us a starting point for the estimation.
+
+We also considered an "elasticity" model:
+
+$$\log(\hat{bv}_i) = \beta_0+\beta_1*log(weight_i)$$
+In this model, we take the natural log of both the dependent and independent variable. The slope ($\beta_1$) in this model can be directly interpreted as the percent change in BV for a one percent increase in tonnage. In short, the model estimates relative change on relative change rather than absolute change on absolute change. The model is more complex but can often fit this kind of data better (as we will show below).
+
+## Combat Units
+
+We focus first on all of the ground combat units, as these are the most likely to need to be randomly generated. @fig-combat-linear-fit shows a scatterplot of weight to BV for every unit, separately by combat unit type. The blue lines indicate the fit of a linear model, while the red lines are LOESS smoothed lines which can detect non-linear relationships. 
+
 ```{r}
+#| label: fig-combat-linear-fit
+#| fig-cap: Linear fit of weight to BV for all combat unit types. Blue line shows the linear fit and the red line shows a smoothed line. 
 units |>
   filter(group == "Combat") |>
   ggplot(aes(x=weight, y=bv))+
-  geom_point(alpha=0.1)+
+  geom_point(alpha=0.2)+
   geom_smooth(method="lm", se=FALSE)+
   geom_smooth(color="red", se=FALSE)+
   facet_wrap(~unit_type, scales = "free")+
   theme_bw()
 ```
 
+A linear fit works pretty well for most of the units in @fig-combat-linear-fit. The two biggest discrepancies are the diminishing returns shape at very high tonnages for mechs and the very non-linear relationship for infantry. The mech issue is likely a result of a single non-canonical 200-ton "Orca" mech that was part of an [April Fool's joke](https://www.sarna.net/wiki/Orca_(BattleMech)]. The infantry issue is a more difficult issue. Most infantry units have very little weight and so they are concentrated at the lower left of the figure, but we see a spike around 50 tons. This is largely for field gunner units which are both much heavier and more effective. The few dots in the 150-ton range are beast-mounted infantry. 
+
+@fig-combat-elasticity-fit provides a similar structure, but on this figure both the x and y axis have been log-scaled. Thus the "linear" fit on these models actually represents the fit of an elasticity model. The fit of this model is very good across all units. Most notably, these transformations largely fixed the problem of nonlinearity for infantry units. We do now observe a slight bit of nonlinearity for Mechs in the low tonnage range, but this is for a very small set of industrial mech units.
+
 ```{r}
+#| label: fig-combat-elasticity-fit
+#| fig-cap: Fit of weight to BV for all combat unit types using a log-scale on both axes. Blue line shows the linear fit and the red line shows a smoothed line. 
 units |>
   filter(group == "Combat") |>
   ggplot(aes(x=weight, y=bv))+
@@ -64,7 +110,49 @@ units |>
   theme_bw()
 ```
 
+To get a sense of how these models compare, we fit each type of model to each unit type. The results are shown in @tbl-model-linear-combat for the linear models, and @tbl-model-elasticity-combat for the elasticity models. 
+
 ```{r}
+#| label: tbl-model-linear-combat
+#| tbl-cap: Linear models predicting unit BV by its weight for all combat unit types.
+models <- units |>
+  filter(group == "Combat") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(bv~weight, data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Combat",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"), statistic = NULL, 
+             coef_rename = c("(Intercept)" = "Intercept", "weight" = "Tonnage"))
+```
+
+```{r}
+#| label: tbl-model-elasticity-combat
+#| tbl-cap: Elasticity models predicting unit BV by its weight for all combat unit types.
+models <- units |>
+  filter(group == "Combat") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(log(bv)~log(weight), data=x, family=poisson)
+  })
+names(models) <- levels(droplevels(units[units$group == "Combat",]$unit_type))
+modelsummary(models, fmt=3, gof_map = c("nobs", "r.squared"), statistic = NULL, 
+             coef_rename = c("(Intercept)" = "Intercept", "weight" = "Tonnage (logged)"))
+```
+
+For all groups, the goodness of fit measure (R2) is either better or effectively the same for the elasticity model in comparison to the linear model In combination with its ability to fix the nonlinearity problem for infantry, these results would strongly recommend the use of an elasticity model to generate generic BV. 
+
+The goodness of fit does vary substantially across unit types in both models. While this is perhaps not ideal, it doesn't necessarily represent an underlying problem with the models. Rather, it indicates that generic BV matching will result in more actual BV variation for those unit types. 
+
+## Support Units
+
+@fig-support-linear-fit and @fig-support-elasticity-fit plot the same figures as above but for support units. 
+
+```{r}
+#| label: fig-support-linear-fit
+#| fig-cap: Linear fit of weight to BV for all support unit types. Blue line shows the linear fit and the red line shows a smoothed line. 
 units |>
   filter(group == "Support") |>
   ggplot(aes(x=weight, y=bv))+
@@ -76,6 +164,8 @@ units |>
 ```
 
 ```{r}
+#| label: fig-support-elasticity-fit
+#| fig-cap: Fit of weight to BV for all support unit types using a log-scale on both axes. Blue line shows the linear fit and the red line shows a smoothed line. 
 units |>
   filter(group == "Support") |>
   ggplot(aes(x=weight, y=bv))+
@@ -88,7 +178,48 @@ units |>
   theme_bw()
 ```
 
+Because we have far fewer units in these classes and they are not necessarily optimized for combat, we get a bit more noisinees in our smoothing measures. However, for both the linear and elasticity case we get decent fits. The elasticity fit seems to improve our model substantially for support tanks in particular. 
+
+@tbl-model-linear-support and @btl-model-elasticity-support provide tables analogous to the tables above for combat units. In all four cases, an elasticity model substantially improves fit. 
+
 ```{r}
+#| label: tbl-model-linear-support
+#| tbl-cap: Linear models predicting unit BV by its weight for all support unit types.
+models <- units |>
+  filter(group == "Support") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(bv~weight, data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Support",]$unit_type))
+modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"), statistic = NULL,
+             coef_rename = c("(Intercept)" = "Intercept", "weight" = "Tonnage"))
+```
+
+```{r}
+#| label: tbl-model-elasticity-support
+#| tbl-cap: Elasticity models predicting unit BV by its weight for all support unit types.
+models <- units |>
+  filter(group == "Support") |>
+  group_by(unit_type) |>
+  group_split() |>
+  map(.f = function(x) {
+    lm(log(bv)~log(weight), data=x)
+  })
+names(models) <- levels(droplevels(units[units$group == "Support",]$unit_type))
+modelsummary(models, fmt=3, gof_map = c("nobs", "r.squared"), statistic = NULL, 
+             coef_rename = c("(Intercept)" = "Intercept", "weight" = "Tonnage (logged)"))
+```
+
+## Large Craft
+
+@fig-large-craft-linear-fit and @fig-large-craft-elasticity-fit provide figures analogous to those above but for large craft. 
+The dropshp and space station fits are particularly poor here. The space station is poor because of very few points and one massive outlier. The dropship data also has a couple of outliers that throw off the results. Switching to an elasticity model, however, improves the fit substantially in both cases. 
+
+```{r}
+#| label: fig-large-craft-linear-fit
+#| fig-cap: Linear fit of weight to BV for all large craft unit types. Blue line shows the linear fit and the red line shows a smoothed line. 
 units |>
   filter(group == "Large Craft") |>
   ggplot(aes(x=weight, y=bv))+
@@ -100,6 +231,8 @@ units |>
 ```
 
 ```{r}
+#| label: fig-large-craft-elasticity-fit
+#| fig-cap: Fit of weight to BV for all large craft unit types using a log-scale on both axes. Blue line shows the linear fit and the red line shows a smoothed line. 
 units |>
   filter(group == "Large Craft") |>
   ggplot(aes(x=weight, y=bv))+
@@ -112,60 +245,11 @@ units |>
   theme_bw()
 ```
 
-```{r}
-models <- units |>
-  filter(group == "Combat") |>
-  group_by(unit_type) |>
-  group_split() |>
-  map(.f = function(x) {
-    lm(bv~weight, data=x)
-  })
-names(models) <- levels(droplevels(units[units$group == "Combat",]$unit_type))
-modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
-             statistic = NULL)
-```
+@tbl-model-linear-large-craft and @tbl-model-elasticity-large-craft show tables analogous to those above but for large craft. For Jumpships and Warships we get substantially better fits with the elasticity model. The space station case is the only case of any unit types where the elasticity model actually performs worse. However, given the sparsity of data here, we don't think randomly generating space stations makes much sense anyway. 
 
 ```{r}
-models <- units |>
-  filter(group == "Combat") |>
-  group_by(unit_type) |>
-  group_split() |>
-  map(.f = function(x) {
-    lm(log(bv)~log(weight), data=x)
-  })
-names(models) <- levels(droplevels(units[units$group == "Combat",]$unit_type))
-modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
-             statistic = NULL)
-```
-
-
-```{r}
-models <- units |>
-  filter(group == "Support") |>
-  group_by(unit_type) |>
-  group_split() |>
-  map(.f = function(x) {
-    lm(bv~weight, data=x)
-  })
-names(models) <- levels(droplevels(units[units$group == "Support",]$unit_type))
-modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
-             statistic = NULL)
-```
-
-```{r}
-models <- units |>
-  filter(group == "Support") |>
-  group_by(unit_type) |>
-  group_split() |>
-  map(.f = function(x) {
-    lm(log(bv)~log(weight), data=x)
-  })
-names(models) <- levels(droplevels(units[units$group == "Support",]$unit_type))
-modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
-             statistic = NULL)
-```
-
-```{r}
+#| label: tbl-model-linear-large-craft
+#| tbl-cap: Linear models predicting unit BV by its weight for all large craft unit types.
 models <- units |>
   filter(group == "Large Craft") |>
   group_by(unit_type) |>
@@ -174,11 +258,13 @@ models <- units |>
     lm(bv~weight, data=x)
   })
 names(models) <- levels(droplevels(units[units$group == "Large Craft",]$unit_type))
-modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
-             statistic = NULL)
+modelsummary(models, fmt=3, gof_map = c("nobs", "r.squared"), statistic = NULL, 
+             coef_rename = c("(Intercept)" = "Intercept", "weight" = "Tonnage"))
 ```
 
 ```{r}
+#| label: tbl-model-elasticity-large-craft
+#| tbl-cap: Elasticity models predicting unit BV by its weight for all large craft unit types.
 models <- units |>
   filter(group == "Large Craft") |>
   group_by(unit_type) |>
@@ -187,7 +273,13 @@ models <- units |>
     lm(log(bv)~log(weight), data=x)
   })
 names(models) <- levels(droplevels(units[units$group == "Large Craft",]$unit_type))
-modelsummary(models, fmt=2, gof_map = c("nobs", "r.squared"),
-             statistic = NULL)
+modelsummary(models, fmt=4, gof_map = c("nobs", "r.squared"), statistic = NULL, 
+             coef_rename = c("(Intercept)" = "Intercept", "weight" = "Tonnage (logged)"))
 ```
 
+
+Interestingly, the R2 values are the lowest for dropships. This suggests that regardless of method dropship generation via generic BV will create a high level of variability. 
+
+## Conclusions
+
+Overall, the results here indicate that we should use an elasticity model for all cases. This improved fit, sometimes substantially, for most units and did not noticeably produce any poor fits.
