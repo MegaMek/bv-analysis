@@ -1,7 +1,6 @@
 ---
 title: "BV to Weight Analysis"
 format:
-  pdf: default
   html:
     embed-resources: true
     toc: true
@@ -47,6 +46,7 @@ units <- units |>
              unit_type == "Aerospace fighter" | 
              unit_type == "Conventional Fighter" ~ "Combat",
            str_detect(unit_type, "Support") | unit_type == "Small Craft" ~ "Support",
+           unit_type == "Gun Emplacement" ~ "Gun Emplacement",
            TRUE ~ "Large Craft")) |>
   select(unit_name, clan, weight, date, quality, unit_type, group, bv)
 ```
@@ -91,7 +91,7 @@ units |>
   theme_bw()
 ```
 
-A linear fit works pretty well for most of the units in @fig-combat-linear-fit. The two biggest discrepancies are the diminishing returns shape at very high tonnages for mechs and the very non-linear relationship for infantry. The mech issue is likely a result of a single non-canonical 200-ton "Orca" mech that was part of an [April Fool's joke](https://www.sarna.net/wiki/Orca_(BattleMech)]. The infantry issue is a more difficult issue. Most infantry units have very little weight and so they are concentrated at the lower left of the figure, but we see a spike around 50 tons. This is largely for field gunner units which are both much heavier and more effective. The few dots in the 150-ton range are beast-mounted infantry. 
+A linear fit works pretty well for most of the units in @fig-combat-linear-fit. The two biggest discrepancies are the diminishing returns shape at very high tonnages for mechs and the very non-linear relationship for infantry. The mech issue is likely a result of a single non-canonical 200-ton "Orca" mech that was part of an [April Fool's joke](https://www.sarna.net/wiki/Orca_%28BattleMech%29). The infantry issue is a more difficult issue. Most infantry units have very little weight and so they are concentrated at the lower left of the figure, but we see a spike around 50 tons. This is largely for field gunner units which are both much heavier and more effective. The few dots in the 150-ton range are beast-mounted infantry. 
 
 @fig-combat-elasticity-fit provides a similar structure, but on this figure both the x and y axis have been log-scaled. Thus the "linear" fit on these models actually represents the fit of an elasticity model. The fit of this model is very good across all units. Most notably, these transformations largely fixed the problem of nonlinearity for infantry units. We do now observe a slight bit of nonlinearity for Mechs in the low tonnage range, but this is for a very small set of industrial mech units.
 
@@ -279,6 +279,16 @@ modelsummary(models, fmt=4, gof_map = c("nobs", "r.squared"), statistic = NULL,
 
 
 Interestingly, the R2 values are the lowest for dropships. This suggests that regardless of method dropship generation via generic BV will create a high level of variability. 
+
+## Gun Emplacements
+
+Gun emplacements need to be handled differently as they currently have no weight. In general, gun emplacements need reworking for many things including balance. For now, we will just use the mean weight of gun emplacements as a static generic BV.
+
+```{r}
+temp <- units |>
+  filter(group == "Gun Emplacement")
+mean(temp$bv)
+```
 
 ## Conclusions
 
